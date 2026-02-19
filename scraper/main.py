@@ -92,7 +92,7 @@ def main():
                 save_progress(current_list_url, seen_ids)
 
             # agresyvumas sumažintas
-            sleep_jitter(8, 18)
+            sleep_jitter(8, 16)
 
             # kas 15 aplankytų auto – trumpas cooldown
             if cars_visited % 15 == 0:
