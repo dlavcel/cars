@@ -15,7 +15,7 @@ from xgboost import XGBRegressor
 # ==========================
 # 1) CONFIG
 # ==========================
-CSV_PATH = "../ultra_scraper/final_results_parsed.csv"
+CSV_PATH = "../scraper/final_results_parsed.csv"
 OUTPUT_PATH = "price_blend_bundle.pkl"
 
 TARGET = "sold_price"

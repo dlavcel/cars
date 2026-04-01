@@ -197,7 +197,7 @@ def db():
 
 
 def reset_scraper():
-    if hasattr(thread_local, "scraper"):
+    if hasattr(thread_local, "old_scraper"):
         del thread_local.scraper
     if hasattr(thread_local, "public_scraper"):
         del thread_local.public_scraper
@@ -318,10 +318,10 @@ def get_pace(mode: str) -> PaceController:
 
 
 def get_scraper(config: dict):
-    scraper = getattr(thread_local, "scraper", None)
+    scraper = getattr(thread_local, "old_scraper", None)
     if scraper is None:
         log(
-            f"[AUTH] init scraper worker={config['worker_name']} "
+            f"[AUTH] init old_scraper worker={config['worker_name']} "
             f"email={config['email']} proxy={config.get('proxy')}"
         )
         scraper = create_authenticated_scraper(

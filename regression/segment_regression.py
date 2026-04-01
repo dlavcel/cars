@@ -21,7 +21,7 @@ from xgboost import XGBRegressor
 # ==========================
 # 1) KONFIGŪRACIJA
 # ==========================
-CSV_PATH = "../ultra_scraper/final_results_parsed.csv"
+CSV_PATH = "../scraper/final_results_parsed.csv"
 CLASSIFIER_PATH = "price_classifier.pkl"
 OUTPUT_PATH = "price_moe_soft_with_classifier.pkl"
 
