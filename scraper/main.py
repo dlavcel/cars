@@ -92,17 +92,12 @@ def main():
                 save_progress(current_list_url, seen_ids)
 
             # agresyvumas sumažintas
-            sleep_jitter(8, 16)
+            sleep_jitter(7, 10)
 
-            # kas 15 aplankytų auto – trumpas cooldown
-            if cars_visited % 15 == 0:
-                cool = random.uniform(20, 45)
-                print(f"🧊 Cooldown after {cars_visited} cars: {cool:.0f}s")
-                time.sleep(cool)
 
             # kas 60 naujų įrašų – ilgesnis cooldown
             if new_written > 0 and new_written % 60 == 0:
-                cool = random.uniform(60, 181)
+                cool = random.uniform(60, 80)
                 print(f"😴 Long cooldown after {new_written} new rows: {cool:.0f}s")
                 time.sleep(cool)
 
@@ -110,7 +105,7 @@ def main():
         page += 1
 
         # tarp puslapių pauzė
-        sleep_jitter(16, 25.2)
+        sleep_jitter(13, 20)
 
     print("DONE. Total new rows:", total)
 

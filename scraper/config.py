@@ -1,5 +1,5 @@
 LIST_URL = "https://autohelperbot.com/en/sales?vehicle=AUTOMOBILE"
-OUT_CSV = "../cars.csv"
+OUT_CSV = "../for_engine_parser_bmw_model_fixed.csv"
 PROGRESS_FILE = "../progress.json"
 
 FIELDNAMES = [

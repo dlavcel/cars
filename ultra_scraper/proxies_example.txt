@@ -1,0 +1,2 @@
+Proxi turi buti saugumos tokiu formatu:
+ip:port:username:password

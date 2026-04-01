@@ -53,7 +53,7 @@ def parse_int_like(s: str):
 
 def parse_mileage(s: str):
     if not s:
-        return (None, None)
+        return None, None
     txt = " ".join(s.split())
     unit = None
     if " mi" in txt:
@@ -61,4 +61,4 @@ def parse_mileage(s: str):
     elif " km" in txt:
         unit = "km"
     val = parse_int_like(txt)
-    return (val, unit)
+    return val, unit

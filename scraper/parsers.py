@@ -62,7 +62,7 @@ def extract_auction_source(soup: BeautifulSoup):
                 return "IAAI"
             return "OTHER"
 
-        # 2) jei linko nėra, bet yra img (kaip tavo pavyzdy)
+        # 2) jei linko nėra, bet yra img
         img = row.find("img")
         if img:
             title = (img.get("title") or "").strip().lower()
@@ -89,7 +89,7 @@ def extract_raw_year_vin_from_h1(h1_text: str):
        vin: 'SALWG2RV7KA836801'
     """
     if not h1_text:
-        return (None, None, None)
+        return None, None, None
 
     txt = " ".join(h1_text.split())
 
@@ -164,7 +164,6 @@ def get_all_image_urls(driver):
 
 
 def parse_vehicle_from_html(driver, url: str, images_str: str):
-    # IMPORTANT: naudok safe_page_source, kad alert'as nenuverstų parserio
     soup = BeautifulSoup(safe_page_source(driver), "html.parser")
 
     h1 = soup.select_one("h1")

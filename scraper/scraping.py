@@ -2,11 +2,9 @@ import time
 import random
 
 from selenium.webdriver.common.by import By
-
 from scraper.parsers import get_all_image_urls, parse_vehicle_from_html
 from scraper.selenium_safety import dismiss_any_alert, is_rate_limited, rate_limit_cooldown, is_blocked_or_challenge
 from scraper.utils import vin_from_car_url, norm_vin
-
 
 def scrape_one_car_with_retries(driver, wait, url, max_retries=2):
 
