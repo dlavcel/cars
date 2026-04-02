@@ -427,7 +427,7 @@ def compute_secondary_only(
     return max_severity_for_indices(view_sev, s_idx) if s_idx else None
 
 
-# -----------------------------
+## -----------------------------
 # 8) Main
 # -------------------------------
 def parse_args():
