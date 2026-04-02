@@ -19,7 +19,7 @@ from xgboost import XGBRegressor
 
 
 # ==========================
-# 1) KONFIGŪRACIJA
+# 1) CONFIGURATION
 # ==========================
 CSV_PATH = "../scraper/final_results_parsed.csv"
 CLASSIFIER_PATH = "price_classifier.pkl"
@@ -68,9 +68,9 @@ RANDOM_STATE = 42
 
 
 # ==========================
-# 2) PAGALBINĖS FUNKCIJOS
+# 2) HELPER FUNCTIONS
 # ==========================
-def evaluate_regression(y_true, y_pred, title="MODELIS"):
+def evaluate_regression(y_true, y_pred, title="MODEL"):
     mae = mean_absolute_error(y_true, y_pred)
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     r2 = r2_score(y_true, y_pred)
@@ -115,7 +115,7 @@ def prepare_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     missing = [c for c in FEATURES if c not in df.columns]
     if missing:
-        raise ValueError(f"Duomenų rinkinyje trūksta stulpelių: {missing}")
+        raise ValueError(f"Missing columns in dataset: {missing}")
 
     for col in NUM_COLS:
         df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -189,11 +189,11 @@ def evaluate_by_true_segment(y_true, y_pred, true_segments, title):
 
 def get_classifier_classes(price_classifier, label_encoder):
     """
-    Grąžina tekstinius klasių pavadinimus ta tvarka,
-    kuria classifier.predict_proba() pateikia tikimybes.
+    Returns textual class labels in the same order
+    as classifier.predict_proba() outputs probabilities.
     """
     if not hasattr(price_classifier, "classes_"):
-        raise ValueError("Klasifikatorius neturi atributo classes_, neįmanoma susieti predict_proba su segmentais.")
+        raise ValueError("Classifier does not have a classes_ attribute, cannot map predict_proba outputs to segments.")
 
     classes_raw = price_classifier.classes_
 
@@ -213,24 +213,24 @@ def soft_moe_predict(
 ):
     """
     Soft Mixture of Experts:
-    - gauname klasių tikimybes iš klasifikatoriaus
-    - kiekvienai klasei paimame expert-modelio prognozę
-    - galutinis rezultatas = suma(weight_i * pred_i)
+    - get class probabilities from the classifier
+    - take expert model predictions for each class
+    - final result = sum(weight_i * pred_i)
 
     class_temperature:
-        <1.0 padaro tikimybių pasiskirstymą aštresnį
-        >1.0 padaro jį švelnesnį
+        <1.0 makes the probability distribution sharper
+        >1.0 makes it smoother
 
     use_top_k:
-        jei nurodyta, naudojame tik top-k labiausiai tikėtinus ekspertus
+        if specified, only the top-k most likely experts are used
     """
     proba = classifier.predict_proba(X)
     class_labels = np.asarray(get_classifier_classes(classifier, label_encoder), dtype=object)
 
     if proba.shape[1] != len(class_labels):
-        raise ValueError("predict_proba stulpelių skaičius nesutampa su class labels kiekiu.")
+        raise ValueError("The number of predict_proba columns does not match the number of class labels.")
 
-    # temperatūros mastelio keitimas
+    # temperature scaling
     if class_temperature != 1.0:
         proba = np.power(proba, 1.0 / class_temperature)
         row_sums = proba.sum(axis=1, keepdims=True)
@@ -245,7 +245,7 @@ def soft_moe_predict(
         row = X.iloc[[i]]
         row_proba = proba[i].copy()
 
-        # tik top-k ekspertai
+        # top-k experts only
         if use_top_k is not None and use_top_k < len(row_proba):
             top_idx = np.argsort(row_proba)[-use_top_k:]
             mask = np.zeros_like(row_proba, dtype=bool)
@@ -271,7 +271,7 @@ def soft_moe_predict(
         final_preds.append(pred_sum)
         top1_classes.append(class_labels[np.argmax(proba[i])])
 
-        # maršruto entropija, kad suprastume „pasitikėjimą“
+        # routing entropy to understand "confidence"
         eps = 1e-12
         entropy = -np.sum(proba[i] * np.log(proba[i] + eps))
         routing_entropy.append(entropy)
@@ -280,7 +280,7 @@ def soft_moe_predict(
 
 
 # ==========================
-# 3) DUOMENŲ ĮKĖLIMAS
+# 3) DATA LOADING
 # ==========================
 df = pd.read_csv(CSV_PATH)
 df = prepare_dataframe(df)
@@ -289,7 +289,7 @@ X = df[FEATURES].copy()
 y = df[TARGET].copy()
 y_classes = make_price_classes(y, BINS)
 
-#!!!!!reikia peržiūrėti stratify!!
+#!!!!! stratify needs to be reviewed!!
 X_train, X_test, y_train, y_test, y_train_cls, y_test_cls = train_test_split(
     X,
     y,
@@ -299,18 +299,18 @@ X_train, X_test, y_train, y_test, y_train_cls, y_test_cls = train_test_split(
     stratify=y_classes,
 )
 
-print("Train dydis:", len(X_train))
-print("Test dydis :", len(X_test))
+print("Train size:", len(X_train))
+print("Test size :", len(X_test))
 
-print("\nTrain klasių kiekiai:")
+print("\nTrain class counts:")
 print(y_train_cls.value_counts().sort_index())
 
-print("\nTest klasių kiekiai:")
+print("\nTest class counts:")
 print(y_test_cls.value_counts().sort_index())
 
 
 # ==========================
-# 4) KAINOS KLASIFIKATORIAUS ĮKĖLIMAS
+# 4) LOAD PRICE CLASSIFIER
 # ==========================
 classifier_bundle = joblib.load(CLASSIFIER_PATH)
 
@@ -323,15 +323,15 @@ else:
     elif "model" in classifier_bundle:
         price_classifier = classifier_bundle["model"]
     else:
-        raise ValueError("Nepavyko rasti classifier objekto price_classifier.pkl viduje")
+        raise ValueError("Could not find a classifier object inside price_classifier.pkl")
 
     label_encoder = classifier_bundle.get("label_encoder")
 
-print("\nKlasifikatorius įkeltas iš:", CLASSIFIER_PATH)
+print("\nClassifier loaded from:", CLASSIFIER_PATH)
 
 
 # ==========================
-# 5) KLASIFIKATORIAUS KOKYBĖS TIKRINIMAS
+# 5) CLASSIFIER QUALITY CHECK
 # ==========================
 pred_test_cls_encoded = price_classifier.predict(X_test)
 
@@ -342,16 +342,16 @@ else:
 
 clf_acc = accuracy_score(y_test_cls, pred_test_cls)
 
-print("\nKLASIFIKATORIAUS KOKYBĖ")
-print("Tikslumas:", round(clf_acc, 4))
+print("\nCLASSIFIER QUALITY")
+print("Accuracy:", round(clf_acc, 4))
 print(classification_report(y_test_cls, pred_test_cls, zero_division=0))
 
-print("\nPROGNOZUOTŲ KLASIŲ KIEKIAI")
+print("\nPREDICTED CLASS COUNTS")
 print(pd.Series(pred_test_cls).value_counts().sort_index())
 
 
 # ==========================
-# 6) REGRESORIŲ MOKYMAS KIEKVIENAM INTERVALUI
+# 6) TRAIN REGRESSORS FOR EACH INTERVAL
 # ==========================
 expert_models = {}
 expert_counts = {}
@@ -365,7 +365,7 @@ for class_label in sorted(y_train_cls.unique()):
     n_test = int(test_mask.sum())
 
     if n_train < MIN_SAMPLES_PER_BIN:
-        print(f"Praleidžiama {class_label}: tik {n_train} train eilučių")
+        print(f"Skipping {class_label}: only {n_train} training rows")
         continue
 
     X_seg_train = X_train.loc[train_mask].copy()
@@ -380,7 +380,7 @@ for class_label in sorted(y_train_cls.unique()):
     expert_models[class_label] = expert
     expert_counts[class_label] = n_train
 
-    print(f"Išmokytas regresorius intervalui {class_label}: train={n_train}, test={n_test}")
+    print(f"Regressor trained for interval {class_label}: train={n_train}, test={n_test}")
 
     if n_test > 0:
         pred_seg_test = expert.predict(X_seg_test)
@@ -394,34 +394,34 @@ expert_interval_metrics_df = pd.DataFrame(expert_interval_metrics)
 if not expert_interval_metrics_df.empty:
     expert_interval_metrics_df = expert_interval_metrics_df.set_index("segment")
     print_metrics_table(
-        "EKSPERTINIAI REGRESORIAI: KOKYBĖ SAVUOSE TIKRUOSE INTERVALUOSE",
+        "EXPERT REGRESSORS: PERFORMANCE ON THEIR OWN TRUE INTERVALS",
         expert_interval_metrics_df[["train_count", "test_count", "MAE", "RMSE", "R2"]],
     )
 else:
-    print("\nNėra išmokytų expert-regresijų vertinimui.")
+    print("\nNo expert regressors available for evaluation.")
 
 
 # ==========================
-# 7) GLOBALUS REGRESORIUS
+# 7) GLOBAL REGRESSOR
 # ==========================
 global_regressor = build_regressor()
 global_regressor.fit(X_train, y_train)
 
 global_preds = global_regressor.predict(X_test)
 global_overall_metrics = evaluate_regression(
-    y_test, global_preds, title="GLOBALUS REGRESORIUS: BENDRAI"
+    y_test, global_preds, title="GLOBAL REGRESSOR: OVERALL"
 )
 
 global_by_segment_df = evaluate_by_true_segment(
     y_true=y_test,
     y_pred=global_preds,
     true_segments=y_test_cls,
-    title="GLOBALUS REGRESORIUS: METRIKOS PAGAL TIKRĄ SEGMENTĄ"
+    title="GLOBAL REGRESSOR: METRICS BY TRUE SEGMENT"
 )
 
 
 # ==========================
-# 8) HARD ROUTING BAZINIS VARIANTAS
+# 8) HARD ROUTING BASELINE
 # ==========================
 hard_preds = []
 hard_used_model = []
@@ -442,23 +442,23 @@ for i in range(len(X_test)):
 hard_preds = np.array(hard_preds)
 
 hard_overall_metrics = evaluate_regression(
-    y_test, hard_preds, title="HARD ROUTING: KLASIFIKATORIUS -> VIENAS EKSPERTAS"
+    y_test, hard_preds, title="HARD ROUTING: CLASSIFIER -> ONE EXPERT"
 )
 
 hard_by_segment_df = evaluate_by_true_segment(
     y_true=y_test,
     y_pred=hard_preds,
     true_segments=y_test_cls,
-    title="HARD ROUTING: METRIKOS PAGAL TIKRĄ SEGMENTĄ"
+    title="HARD ROUTING: METRICS BY TRUE SEGMENT"
 )
 
 
 # ==========================
 # 9) SOFT MIXTURE OF EXPERTS
 # ==========================
-# galima bandyti:
+# possible values to try:
 # class_temperature = 0.7 / 0.8 / 1.0 / 1.2
-# use_top_k = 2 arba 3
+# use_top_k = 2 or 3
 SOFT_TEMPERATURE = 0.8
 SOFT_TOP_K = 2
 
@@ -473,19 +473,19 @@ soft_preds, soft_top1_classes, soft_entropy, soft_proba, soft_class_labels = sof
 )
 
 soft_overall_metrics = evaluate_regression(
-    y_test, soft_preds, title=f"SOFT MOE: BENDRAI (temperature={SOFT_TEMPERATURE}, top_k={SOFT_TOP_K})"
+    y_test, soft_preds, title=f"SOFT MOE: OVERALL (temperature={SOFT_TEMPERATURE}, top_k={SOFT_TOP_K})"
 )
 
 soft_by_segment_df = evaluate_by_true_segment(
     y_true=y_test,
     y_pred=soft_preds,
     true_segments=y_test_cls,
-    title="SOFT MOE: METRIKOS PAGAL TIKRĄ SEGMENTĄ"
+    title="SOFT MOE: METRICS BY TRUE SEGMENT"
 )
 
 
 # ==========================
-# 10) PALYGINIMO LENTELĖS
+# 10) COMPARISON TABLES
 # ==========================
 summary_overall_df = pd.DataFrame([
     {"model": "global_regressor", **global_overall_metrics},
@@ -493,7 +493,7 @@ summary_overall_df = pd.DataFrame([
     {"model": "soft_moe", **soft_overall_metrics},
 ]).set_index("model")
 
-print_metrics_table("BENDRAS MODELIŲ PALYGINIMAS", summary_overall_df)
+print_metrics_table("OVERALL MODEL COMPARISON", summary_overall_df)
 
 per_segment_comparison_df = (
     global_by_segment_df.add_prefix("global_")
@@ -502,13 +502,13 @@ per_segment_comparison_df = (
 )
 
 print_metrics_table(
-    "PALYGINIMAS PAGAL SEGMENTUS: GLOBAL VS HARD ROUTING VS SOFT MOE",
+    "COMPARISON BY SEGMENT: GLOBAL VS HARD ROUTING VS SOFT MOE",
     per_segment_comparison_df
 )
 
 
 # ==========================
-# 11) DETALI VERTINIMO LENTELĖ
+# 11) DETAILED EVALUATION TABLE
 # ==========================
 eval_df = pd.DataFrame({
     "true_price": y_test.values,
@@ -526,12 +526,12 @@ eval_df["hard_abs_error"] = np.abs(eval_df["true_price"] - eval_df["hard_pred"])
 eval_df["soft_abs_error"] = np.abs(eval_df["true_price"] - eval_df["soft_pred"])
 
 print(f"\n{'=' * 90}")
-print("GALUTINIO PALYGINIMO PAVYZDYS (PRADŽIA)")
+print("FINAL COMPARISON EXAMPLE (BEGINNING)")
 print('=' * 90)
 print(eval_df.head(20).to_string(float_format=lambda x: f"{x:.4f}"))
 
 
-# išsaugosime klasių tikimybes analizei
+# save class probabilities for analysis
 soft_proba_df = pd.DataFrame(
     soft_proba,
     columns=[f"proba_{c}" for c in soft_class_labels],
@@ -539,13 +539,13 @@ soft_proba_df = pd.DataFrame(
 )
 
 print(f"\n{'=' * 90}")
-print("SOFT KLASIŲ TIKIMYBIŲ PAVYZDYS (PRADŽIA)")
+print("SOFT CLASS PROBABILITIES EXAMPLE (BEGINNING)")
 print('=' * 90)
 print(soft_proba_df.head(10).to_string(float_format=lambda x: f"{x:.4f}"))
 
 
 # ==========================
-# 12) VISKO IŠSAUGOJIMAS
+# 12) SAVE EVERYTHING
 # ==========================
 bundle = {
     "saved_at": datetime.now(),
@@ -587,11 +587,11 @@ bundle = {
 }
 
 joblib.dump(bundle, OUTPUT_PATH)
-print(f"\nPaketas išsaugotas į: {OUTPUT_PATH}")
+print(f"\nBundle saved to: {OUTPUT_PATH}")
 
 
 # ==========================
-# 13) PROGNOZAVIMO FUNKCIJA
+# 13) PREDICTION FUNCTION
 # ==========================
 def predict_price_with_soft_moe(bundle_path: str, raw_df: pd.DataFrame) -> np.ndarray:
     bundle = joblib.load(bundle_path)
@@ -610,7 +610,7 @@ def predict_price_with_soft_moe(bundle_path: str, raw_df: pd.DataFrame) -> np.nd
 
     missing = [c for c in features if c not in raw_df.columns]
     if missing:
-        raise ValueError(f"raw_df trūksta stulpelių: {missing}")
+        raise ValueError(f"raw_df is missing columns: {missing}")
 
     for col in NUM_COLS:
         raw_df[col] = pd.to_numeric(raw_df[col], errors="coerce")
@@ -639,7 +639,7 @@ def predict_price_with_soft_moe(bundle_path: str, raw_df: pd.DataFrame) -> np.nd
 
 
 # ==========================
-# 14) PASIRINKTINAI: HARD PREDICT FUNKCIJA
+# 14) OPTIONAL: HARD PREDICT FUNCTION
 # ==========================
 def predict_price_with_hard_routing(bundle_path: str, raw_df: pd.DataFrame) -> np.ndarray:
     bundle = joblib.load(bundle_path)
@@ -654,7 +654,7 @@ def predict_price_with_hard_routing(bundle_path: str, raw_df: pd.DataFrame) -> n
 
     missing = [c for c in features if c not in raw_df.columns]
     if missing:
-        raise ValueError(f"raw_df trūksta stulpelių: {missing}")
+        raise ValueError(f"raw_df is missing columns: {missing}")
 
     for col in NUM_COLS:
         raw_df[col] = pd.to_numeric(raw_df[col], errors="coerce")
@@ -691,4 +691,4 @@ def predict_price_with_hard_routing(bundle_path: str, raw_df: pd.DataFrame) -> n
 
 
 if __name__ == "__main__":
-    print("\nScenarijus sėkmingai baigtas.")
+    print("\nScript completed successfully.")

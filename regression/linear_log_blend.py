@@ -88,7 +88,7 @@ def prepare_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     if "currency" in df.columns:
         cad_mask = df["currency"] == "CAD"
-        df.loc[cad_mask, "sold_price"] = df.loc[cad_mask, "sold_price"] * 0.74  # курс
+        df.loc[cad_mask, "sold_price"] = df.loc[cad_mask, "sold_price"] * 0.74
 
     df = df[df["sold_price"].notna()]
     df = df[df["sold_price"] >= 1000]
@@ -112,11 +112,6 @@ def prepare_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     for col in CAT_COLS:
         df[col] = df[col].astype("string").fillna("UNKNOWN")
-
-    # df["damage_secondary"] = df["damage_secondary"].replace({"UNKNOWN": "NONE"})
-    # mask_none = df["damage_secondary"] == "NONE"
-    # df.loc[mask_none, "damage_secondary_severity"] = "NONE"
-    # df["damage_secondary_severity"] = df["damage_secondary_severity"].fillna("UNKNOWN")
 
     return df
 
@@ -381,10 +376,6 @@ bundle = {
     "overall_metrics": comparison_df.to_dict(orient="records"),
     "segment_metrics": segment_comparison_df.to_dict(orient="records"),
 }
-
-#joblib.dump(bundle, OUTPUT_PATH)
-#print(f"\nSaved bundle to: {OUTPUT_PATH}")
-
 
 # ==========================
 # 10) PREDICT FUNCTION

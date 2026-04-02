@@ -29,9 +29,8 @@ except ImportError:
 
 warnings.filterwarnings("ignore")
 
-
 # ==========================
-# 1) CONFIG
+# CONFIG
 # ==========================
 CSV_PATH = "./cleaned.csv"
 OUTPUT_PATH = "benchmark_results.pkl"
@@ -49,7 +48,7 @@ BLEND_LINEAR_WEIGHT = 0.4
 BLEND_LOG_WEIGHT = 0.6
 
 if not np.isclose(BLEND_LINEAR_WEIGHT + BLEND_LOG_WEIGHT, 1.0):
-    raise ValueError("BLEND_LINEAR_WEIGHT + BLEND_LOG_WEIGHT turi sudaryti 1.0")
+    raise ValueError("BLEND_LINEAR_WEIGHT + BLEND_LOG_WEIGHT must sum to 1.0")
 
 CURRENT_YEAR = 2026
 CAD_TO_USD = 0.73
@@ -71,17 +70,13 @@ NUM_COLS = [
     "year",
     "primary_damage_severity",
     "secondary_damage_severity",
-    "primary_severity_was_missing",
-    "secondary_severity_was_missing",
-    "secondary_damage_present",
     "make_model_year_price_median",
 ]
 
 FEATURES = CAT_COLS + NUM_COLS
 
-
 # ==========================
-# 2) METRICS / HELPERS
+# METRICS / HELPERS
 # ==========================
 def accuracy_within_pct(y_true, y_pred, pct=0.2):
     y_true = np.asarray(y_true, dtype=float)
@@ -133,24 +128,15 @@ def blend_predictions(
     pred_final = linear_weight * pred_linear + log_weight * pred_log
     return np.clip(pred_final, min_price, max_price)
 
-
 # ==========================
-# 3) TEXT / DAMAGE HELPERS
+# TEXT / DAMAGE HELPERS
 # ==========================
-def clean_text_unknown(x):
+def clean_text(x):
     if pd.isna(x):
         return "UNKNOWN"
     x = str(x).strip().upper()
     x = re.sub(r"\s+", " ", x)
     return x if x else "UNKNOWN"
-
-
-def clean_text_none(x):
-    if pd.isna(x):
-        return "NONE"
-    x = str(x).strip().upper()
-    x = re.sub(r"\s+", " ", x)
-    return x if x else "NONE"
 
 
 def damage_score_fn(dmg: str) -> int:
@@ -215,90 +201,18 @@ NON_VISUAL = {
 }
 
 
-def fit_damage_severity_maps(train_df: pd.DataFrame) -> dict:
-    result = {}
-
-    for dmg_col, sev_col in [
-        ("primary_damage", "primary_damage_severity"),
-        ("secondary_damage", "secondary_damage_severity"),
-    ]:
-        tmp = train_df.copy()
-        tmp[dmg_col] = tmp[dmg_col].astype(str).str.upper().str.strip()
-        tmp[sev_col] = pd.to_numeric(tmp[sev_col], errors="coerce")
-
-        valid = tmp[tmp[sev_col].notna() & (tmp[sev_col] > 0)].copy()
-
-        damage_to_median = valid.groupby(dmg_col)[sev_col].median().to_dict()
-        global_median = float(valid[sev_col].median()) if len(valid) else 1.0
-
-        result[f"{sev_col}_map"] = damage_to_median
-        result[f"{sev_col}_global"] = global_median
-
-    return result
-
-
-def normalize_primary_damage_severity(
-    damage_col: pd.Series,
-    severity_col: pd.Series,
-    damage_to_median: dict,
-    global_median: float,
-) -> tuple[pd.Series, pd.Series]:
-    damage = damage_col.fillna("UNKNOWN").astype(str).str.upper().str.strip()
+def normalize_damage_severity(damage_col: pd.Series, severity_col: pd.Series) -> pd.Series:
     severity = pd.to_numeric(severity_col, errors="coerce")
+    damage_clean = damage_col.fillna("UNKNOWN").astype(str).str.upper().str.strip()
 
-    was_missing = (severity.isna()) | (severity <= 0)
-    result = severity.copy()
+    needs_default_one = damage_clean.isin(NON_VISUAL) & (severity.isna() | (severity <= 0))
 
-    none_like = damage.isin(["NONE", "UNKNOWN"])
-    result.loc[none_like & was_missing] = 0
-
-    non_visual_mask = damage.isin(NON_VISUAL)
-    result.loc[non_visual_mask & was_missing & ~none_like] = 1
-
-    remaining = result.isna() | (result <= 0)
-    result.loc[remaining] = (
-        damage[remaining].map(damage_to_median).fillna(global_median).values
-    )
-
-    result = result.fillna(global_median)
-    return result.astype(float), was_missing.astype(int)
-
-
-def normalize_secondary_damage_severity(
-    damage_col: pd.Series,
-    severity_col: pd.Series,
-    damage_to_median: dict,
-    global_median: float,
-) -> tuple[pd.Series, pd.Series, pd.Series]:
-    damage = damage_col.fillna("NONE").astype(str).str.upper().str.strip()
-    severity = pd.to_numeric(severity_col, errors="coerce")
-
-    was_missing = (severity.isna()) | (severity <= 0)
-    result = severity.copy()
-
-    no_secondary = damage.isin(["NONE", "NO DAMAGE", "NULL", "NAN", ""])
-    secondary_present = (~no_secondary).astype(int)
-
-    result.loc[no_secondary] = 0
-
-    missing_with_damage = (~no_secondary) & was_missing
-
-    non_visual_mask = damage.isin(NON_VISUAL)
-    result.loc[missing_with_damage & non_visual_mask] = 1
-
-    still_missing = (result.isna() | (result <= 0)) & (~no_secondary)
-    result.loc[still_missing] = (
-        damage[still_missing].map(damage_to_median).fillna(global_median).values
-    )
-
-    result.loc[no_secondary] = 0
-    result = result.fillna(0)
-
-    return result.astype(float), was_missing.astype(int), secondary_present.astype(int)
-
+    severity = severity.fillna(0)
+    severity.loc[needs_default_one] = 1
+    return severity
 
 # ==========================
-# 4) OOF HELPERS
+# OOF HELPERS
 # ==========================
 def make_group_key(frame: pd.DataFrame, cols: list[str]) -> pd.Series:
     return frame[cols].apply(tuple, axis=1)
@@ -332,23 +246,19 @@ def make_oof_group_median(
 
     return oof, test_feat, full_map, global_val
 
-
 # ==========================
-# 5) BASE PREPROCESS
+# BASE PREPROCESS
 # ==========================
-TEXT_COLS_UNKNOWN = [
+TEXT_COLS = [
     "make",
     "model",
     "primary_damage",
+    "secondary_damage",
     "transmission",
     "fuel_type",
     "drive_type",
     "seller_type",
     "color",
-]
-
-TEXT_COLS_NONE = [
-    "secondary_damage",
 ]
 
 NUMERIC_PARSE_COLS = [
@@ -357,8 +267,6 @@ NUMERIC_PARSE_COLS = [
     "year",
     "engine_volume",
     "cylinders",
-    "primary_damage_severity",
-    "secondary_damage_severity",
 ]
 
 
@@ -367,20 +275,15 @@ def preprocess_base_rowwise(df_raw: pd.DataFrame) -> pd.DataFrame:
     df = df.replace("", np.nan)
     df["mileage"] = df["mileage"].replace(1, np.nan)
 
-    for col in TEXT_COLS_UNKNOWN:
+    for col in TEXT_COLS:
         if col not in df.columns:
             df[col] = np.nan
-        df[col] = df[col].apply(clean_text_unknown)
-
-    for col in TEXT_COLS_NONE:
-        if col not in df.columns:
-            df[col] = np.nan
-        df[col] = df[col].apply(clean_text_none)
+        df[col] = df[col].apply(clean_text)
 
     if "currency" not in df.columns:
         df["currency"] = "USD"
     else:
-        df["currency"] = df["currency"].apply(clean_text_unknown)
+        df["currency"] = df["currency"].apply(clean_text)
 
     for col in NUMERIC_PARSE_COLS:
         if col not in df.columns:
@@ -415,28 +318,21 @@ def fit_base_preprocess_bundle(train_df_rowwise: pd.DataFrame) -> dict:
         "make": 100,
         "model": 20,
         "color": 100,
-        "damage_combo": 50,
     }
-
-    tmp = df.copy()
-    tmp["damage_combo"] = (
-        tmp["primary_damage"].fillna("UNKNOWN") + "__" + tmp["secondary_damage"].fillna("NONE")
-    )
 
     rare_maps = {}
     for col, min_count in rare_thresholds.items():
-        vc = tmp[col].value_counts(dropna=False)
+        if col not in df.columns:
+            continue
+        vc = df[col].value_counts(dropna=False)
         keep_values = set(vc[vc >= min_count].index.tolist())
         rare_maps[col] = keep_values
-
-    severity_maps_bundle = fit_damage_severity_maps(df)
 
     return {
         "upper_price_quantile": upper_q,
         "engine_volume_median": engine_volume_median,
         "cylinders_median": cylinders_median,
         "rare_maps": rare_maps,
-        "severity_maps_bundle": severity_maps_bundle,
     }
 
 
@@ -462,53 +358,18 @@ def apply_base_preprocess(
     df["engine_volume"] = df["engine_volume"].fillna(base_bundle["engine_volume_median"])
     df["cylinders"] = df["cylinders"].fillna(base_bundle["cylinders_median"])
 
-    df["primary_damage"] = df["primary_damage"].apply(clean_text_unknown)
-    df["secondary_damage"] = df["secondary_damage"].apply(clean_text_none)
-
-    df["damage_combo"] = (
-        df["primary_damage"].fillna("UNKNOWN") + "__" + df["secondary_damage"].fillna("NONE")
-    )
-
-    sev_maps = base_bundle["severity_maps_bundle"]
-
-    (
-        df["primary_damage_severity"],
-        df["primary_severity_was_missing"],
-    ) = normalize_primary_damage_severity(
+    df["primary_damage_severity"] = normalize_damage_severity(
         df["primary_damage"],
         df["primary_damage_severity"],
-        sev_maps["primary_damage_severity_map"],
-        sev_maps["primary_damage_severity_global"],
     )
-
-    (
-        df["secondary_damage_severity"],
-        df["secondary_severity_was_missing"],
-        df["secondary_damage_present"],
-    ) = normalize_secondary_damage_severity(
+    df["secondary_damage_severity"] = normalize_damage_severity(
         df["secondary_damage"],
         df["secondary_damage_severity"],
-        sev_maps["secondary_damage_severity_map"],
-        sev_maps["secondary_damage_severity_global"],
     )
-
-    df["primary_damage_score"] = df["primary_damage"].apply(damage_score_fn)
-    df["secondary_damage_score"] = df["secondary_damage"].apply(damage_score_fn)
-
-    df["primary_damage_weighted_score"] = df["primary_damage_score"] * df["primary_damage_severity"]
-    df["secondary_damage_weighted_score"] = df["secondary_damage_score"] * df["secondary_damage_severity"]
-
-    df["damage_score"] = df["primary_damage_weighted_score"] + df["secondary_damage_weighted_score"]
-    df["max_damage_score"] = df[
-        ["primary_damage_weighted_score", "secondary_damage_weighted_score"]
-    ].max(axis=1)
-
-    df["engine_volume"] = df["engine_volume"].fillna(base_bundle["engine_volume_median"])
-    df["cylinders"] = df["cylinders"].fillna(base_bundle["cylinders_median"])
 
     df.loc[df["fuel_type"].isin(["ELECTRIC", "OTHER"]), ["engine_volume", "cylinders"]] = 0
 
-    for col in ["make", "model", "color", "damage_combo"]:
+    for col in ["make", "model", "color"]:
         keep_values = base_bundle["rare_maps"][col]
         df[col] = df[col].where(df[col].isin(keep_values), "OTHER")
 
@@ -525,9 +386,8 @@ def apply_base_preprocess(
 
     return df.reset_index(drop=True)
 
-
 # ==========================
-# 6) FEATURE ENGINEERING
+# FEATURE ENGINEERING
 # ==========================
 def build_train_test_features(
     train_df: pd.DataFrame,
@@ -585,9 +445,8 @@ def apply_saved_feature_engineering(df: pd.DataFrame, feature_stats_bundle: dict
 
     return df
 
-
 # ==========================
-# 7) PREPROCESSORS
+# PREPROCESSORS
 # ==========================
 def build_ohe_preprocessor() -> ColumnTransformer:
     return ColumnTransformer(
@@ -628,9 +487,8 @@ def prepare_catboost_inputs(X_train: pd.DataFrame, X_test: pd.DataFrame):
     cat_feature_indices = [X_train_cb.columns.get_loc(col) for col in CAT_COLS]
     return X_train_cb, X_test_cb, cat_feature_indices
 
-
 # ==========================
-# 8) MODEL BUILDERS
+# MODEL BUILDERS
 # ==========================
 def build_ohe_model_pipeline(model_name: str) -> Pipeline:
     model_name = model_name.lower()
@@ -640,8 +498,8 @@ def build_ohe_model_pipeline(model_name: str) -> Pipeline:
 
     elif model_name == "random_forest":
         reg = RandomForestRegressor(
-            n_estimators=1,
-            max_depth=1,
+            n_estimators=300,
+            max_depth=8,
             min_samples_split=5,
             min_samples_leaf=2,
             n_jobs=-1,
@@ -661,7 +519,7 @@ def build_ohe_model_pipeline(model_name: str) -> Pipeline:
 
     elif model_name == "lightgbm":
         if not HAS_LGBM:
-            raise ImportError("lightgbm nėra įdiegtas")
+            raise ImportError("lightgbm is not installed")
         reg = LGBMRegressor(
             n_estimators=800,
             learning_rate=0.05,
@@ -685,10 +543,10 @@ def build_ohe_model_pipeline(model_name: str) -> Pipeline:
 
 def build_catboost_regressor():
     if not HAS_CATBOOST:
-        raise ImportError("catboost nėra įdiegtas")
+        raise ImportError("catboost is not installed")
 
     return CatBoostRegressor(
-        iterations=1,
+        iterations=800,
         learning_rate=0.05,
         depth=6,
         loss_function="RMSE",
@@ -697,9 +555,8 @@ def build_catboost_regressor():
         verbose=0,
     )
 
-
 # ==========================
-# 9) TRAIN / EVAL HELPERS
+# TRAIN / EVAL HELPERS
 # ==========================
 def train_and_evaluate_ohe_model(
     model_name: str,
@@ -834,9 +691,8 @@ def train_and_evaluate_catboost(
         "cat_feature_indices": cat_feature_indices,
     }
 
-
 # ==========================
-# 10) FEATURE IMPORTANCE
+# FEATURE IMPORTANCE
 # ==========================
 def get_grouped_feature_importance_df(
     model_pipeline: Pipeline,
@@ -892,9 +748,8 @@ def get_catboost_feature_importance_df(model, feature_names: list[str]) -> pd.Da
 
     return fi_df
 
-
 # ==========================
-# 11) INFERENCE HELPERS
+# INFERENCE HELPERS
 # ==========================
 def preprocess_raw_df_for_bundle(raw_df: pd.DataFrame, bundle: dict) -> pd.DataFrame:
     df = preprocess_base_rowwise(raw_df)
@@ -903,13 +758,12 @@ def preprocess_raw_df_for_bundle(raw_df: pd.DataFrame, bundle: dict) -> pd.DataF
 
     missing = [c for c in bundle["features"] if c not in df.columns]
     if missing:
-        raise ValueError(f"Po feature engineering trūksta stulpelių: {missing}")
+        raise ValueError(f"Missing columns after feature engineering: {missing}")
 
     return df[bundle["features"]].copy()
 
-
 # ==========================
-# 12) MAIN BENCHMARK
+# MAIN BENCHMARK
 # ==========================
 if __name__ == "__main__":
     df_raw = pd.read_csv(CSV_PATH)
@@ -931,8 +785,8 @@ if __name__ == "__main__":
     train_df = apply_base_preprocess(train_rowwise, base_preprocess_bundle, is_training=True)
     test_df = apply_base_preprocess(test_rowwise, base_preprocess_bundle, is_training=True)
 
-    print("Train size after base preprocess:", len(train_df))
-    print("Test size after base preprocess :", len(test_df))
+    print("Train size after base preprocessing:", len(train_df))
+    print("Test size after base preprocessing :", len(test_df))
     print("Train price min/max:", train_df[TARGET].min(), train_df[TARGET].max())
     print("Mean test price:", test_df[TARGET].mean())
 
@@ -947,9 +801,9 @@ if __name__ == "__main__":
     missing_train = [c for c in FEATURES if c not in train_fe.columns]
     missing_test = [c for c in FEATURES if c not in test_fe.columns]
     if missing_train:
-        raise ValueError(f"train_fe trūksta stulpelių: {missing_train}")
+        raise ValueError(f"Missing columns in train_fe: {missing_train}")
     if missing_test:
-        raise ValueError(f"test_fe trūksta stulpelių: {missing_test}")
+        raise ValueError(f"Missing columns in test_fe: {missing_test}")
 
     X_train = train_fe[FEATURES].copy()
     X_test = test_fe[FEATURES].copy()
@@ -968,7 +822,7 @@ if __name__ == "__main__":
     if HAS_LGBM:
         model_names.append("lightgbm")
     else:
-        print("\n[WARN] lightgbm nėra įdiegtas, praleidžiu.")
+        print("\n[WARN] lightgbm is not installed. Skipping.")
 
     benchmark_rows = []
     fitted_results = {}
@@ -1022,7 +876,7 @@ if __name__ == "__main__":
             **cb_result["blend_metrics"],
         })
     else:
-        print("[WARN] catboost nėra įdiegtas, praleidžiu.")
+        print("[WARN] catboost is not installed. Skipping.")
 
     comparison_df = pd.DataFrame(benchmark_rows)
 
