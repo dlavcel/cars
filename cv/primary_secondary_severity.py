@@ -1,13 +1,13 @@
 """
 evaluate_primary_secondary.py
 
-Логика:
-- yolov8m30.pt оценивает только primary_damage
-- yolov8m120.pt оценивает только secondary_damage
-- для каждой модели можно задать разные параметры
-- выход: folder, damage_primary_severity, damage_secondary_severity
+Logika:
+- yolov8m30.pt vertina tik primary_damage
+- yolov8m120.pt vertina tik secondary_damage
+- kiekvienam modeliui galima nustatyti skirtingus parametrus
+- išvestis: folder, damage_primary_severity, damage_secondary_severity
 
-Пример:
+Pavyzdys:
 python evaluate_primary_secondary.py \
   --cars_root ../cars_test \
   --meta_csv ../cars_test_meta.csv \
@@ -491,7 +491,6 @@ def main():
 
     meta = pd.read_csv(meta_csv)
 
-    # поддержка обоих вариантов названий колонок
     if {"damage_primary", "damage_secondary"}.issubset(meta.columns):
         primary_col = "damage_primary"
         secondary_col = "damage_secondary"
