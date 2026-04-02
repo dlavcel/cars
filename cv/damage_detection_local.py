@@ -429,7 +429,7 @@ def compute_secondary_only(
 
 # -----------------------------
 # 8) Main
-# -----------------------------
+# ------------------------------
 def parse_args():
     parser = argparse.ArgumentParser()
 
