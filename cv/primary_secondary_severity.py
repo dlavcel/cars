@@ -40,7 +40,7 @@ import torch
 from ultralytics import YOLO
 from torchvision.ops import nms
 
-from img_test.severity_estimation import score_view
+from cv.severity_estimation import score_view
 
 
 # -----------------------------
