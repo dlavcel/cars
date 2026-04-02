@@ -14,7 +14,6 @@ python evaluate_primary_secondary.py \
   --best_weights yolov8m30.pt \
   --yolo_weights yolov8m120.pt \
   --out_csv primary_secondary_results.csv \
-  --mode baseline \
   --best_imgsz 640 \
   --best_conf 0.50 \
   --best_iou_tile 0.45 \
@@ -177,37 +176,9 @@ def select_primary_secondary_indices(
     primary_key: str,
     secondary_key: str,
     n_imgs: int,
-    mode: str = "baseline",
 ) -> Tuple[List[int], List[int]]:
-    if mode not in {"baseline", "disjoint"}:
-        raise ValueError("mode must be 'baseline' or 'disjoint'")
-
-    p = primary_key
-    s = secondary_key
-
-    if mode == "disjoint":
-        if {p, s} == {"FRONT_END", "SIDE"}:
-            if n_imgs == 6:
-                p_idx = [1, 4, 5] if p == "FRONT_END" else [2, 3]
-                s_idx = [2, 3] if s == "SIDE" else [1, 4, 5]
-                return p_idx, s_idx
-            if n_imgs == 4:
-                p_idx = [1, 2] if p == "FRONT_END" else [3, 4]
-                s_idx = [3, 4] if s == "SIDE" else [1, 2]
-                return p_idx, s_idx
-
-        if {p, s} == {"REAR_END", "SIDE"}:
-            if n_imgs == 6:
-                p_idx = [2, 3, 6] if p == "REAR_END" else [1, 4]
-                s_idx = [1, 4] if s == "SIDE" else [2, 3, 6]
-                return p_idx, s_idx
-            if n_imgs == 4:
-                p_idx = [3, 4] if p == "REAR_END" else [1, 2]
-                s_idx = [1, 2] if s == "SIDE" else [3, 4]
-                return p_idx, s_idx
-
-    p_idx = select_indices_for_damage_key(p, n_imgs) if p != "NONE" else []
-    s_idx = select_indices_for_damage_key(s, n_imgs) if s != "NONE" else []
+    p_idx = select_indices_for_damage_key(primary_key, n_imgs) if primary_key != "NONE" else []
+    s_idx = select_indices_for_damage_key(secondary_key, n_imgs) if secondary_key != "NONE" else []
     return p_idx, s_idx
 
 
@@ -437,11 +408,10 @@ def compute_primary_only(
     n_imgs: int,
     primary_damage: Optional[str],
     secondary_damage: Optional[str],
-    mode: str = "baseline",
 ) -> Optional[float]:
     p_key = damage_to_key(primary_damage)
     s_key = damage_to_key(secondary_damage)
-    p_idx, _ = select_primary_secondary_indices(p_key, s_key, n_imgs, mode=mode)
+    p_idx, _ = select_primary_secondary_indices(p_key, s_key, n_imgs)
     return max_severity_for_indices(view_sev, p_idx) if p_idx else None
 
 
@@ -450,11 +420,10 @@ def compute_secondary_only(
     n_imgs: int,
     primary_damage: Optional[str],
     secondary_damage: Optional[str],
-    mode: str = "baseline",
 ) -> Optional[float]:
     p_key = damage_to_key(primary_damage)
     s_key = damage_to_key(secondary_damage)
-    _, s_idx = select_primary_secondary_indices(p_key, s_key, n_imgs, mode=mode)
+    _, s_idx = select_primary_secondary_indices(p_key, s_key, n_imgs)
     return max_severity_for_indices(view_sev, s_idx) if s_idx else None
 
 
@@ -463,21 +432,26 @@ def compute_secondary_only(
 # -----------------------------
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", type=str, default="baseline", choices=["baseline", "disjoint"])
+
+    parser.add_argument("--cars_root", type=Path, default="F:/cars")
+    parser.add_argument("--meta_csv", type=Path, default="../other/failas_updated.csv")
+    parser.add_argument("--out_csv", type=Path, default="severity_updated.csv")
+    parser.add_argument("--yolov8m30_weights", type=str, default="yolov8m30.pt")
+    parser.add_argument("--yolov8m120_weights", type=str, default="yolov8m120.pt")
 
     # yolov8m30.pt params -> primary
-    parser.add_argument("--best_imgsz", type=int, default=640)
-    parser.add_argument("--best_conf", type=float, default=0.50)
-    parser.add_argument("--best_iou_tile", type=float, default=0.45)
-    parser.add_argument("--best_iou_merge", type=float, default=0.25)
-    parser.add_argument("--best_overlap", type=float, default=0.10)
+    parser.add_argument("--yolov8m30_imgsz", type=int, default=640)
+    parser.add_argument("--yolov8m30_conf", type=float, default=0.50)
+    parser.add_argument("--yolov8m30_iou_tile", type=float, default=0.45)
+    parser.add_argument("--yolov8m30_iou_merge", type=float, default=0.25)
+    parser.add_argument("--yolov8m30_overlap", type=float, default=0.10)
 
     # yolov8m120.pt params -> secondary
-    parser.add_argument("--yolo_imgsz", type=int, default=1024)
-    parser.add_argument("--yolo_conf", type=float, default=0.25)
-    parser.add_argument("--yolo_iou_tile", type=float, default=0.60)
-    parser.add_argument("--yolo_iou_merge", type=float, default=0.40)
-    parser.add_argument("--yolo_overlap", type=float, default=0.20)
+    parser.add_argument("--yolov8m120_imgsz", type=int, default=1024)
+    parser.add_argument("--yolov8m120_conf", type=float, default=0.25)
+    parser.add_argument("--yolov8m120_iou_tile", type=float, default=0.60)
+    parser.add_argument("--yolov8m120_iou_merge", type=float, default=0.40)
+    parser.add_argument("--yolov8m120_overlap", type=float, default=0.20)
 
     return parser.parse_args()
 
@@ -485,9 +459,9 @@ def parse_args():
 def main():
     args = parse_args()
 
-    cars_root = Path("F:/cars")
-    meta_csv = Path("../other/failas_updated.csv")
-    out_csv = Path("severity_updated.csv")
+    cars_root = args.cars_root
+    meta_csv = args.meta_csv
+    out_csv = args.out_csv
 
     meta = pd.read_csv(meta_csv)
 
@@ -509,8 +483,8 @@ def main():
 
     device = 0 if torch.cuda.is_available() else None
 
-    model_best = YOLO("yolov8m30.pt")   # primary
-    model_yolo = YOLO("yolov8m120.pt")   # secondary
+    model_yolov8m30 = YOLO(args.yolov8m30_weights)      # primary
+    model_yolov8m120 = YOLO(args.yolov8m120_weights)    # secondary
 
     meta_by_id = meta.copy()
     meta_by_id["id"] = meta_by_id["id"].astype(str)
@@ -552,46 +526,42 @@ def main():
             })
             continue
 
-        # yolov8m30.pt -> primary only
         primary_sev = None
         if primary_damage is not None:
-            view_best, _ = score_views_for_car(
-                model=model_best,
+            view_yolov8m30, _ = score_views_for_car(
+                model=model_yolov8m30,
                 car_dir=car_dir,
                 device=device,
-                imgsz=args.best_imgsz,
-                conf=args.best_conf,
-                iou_tile=args.best_iou_tile,
-                iou_merge=args.best_iou_merge,
-                overlap=args.best_overlap,
+                imgsz=args.yolov8m30_imgsz,
+                conf=args.yolov8m30_conf,
+                iou_tile=args.yolov8m30_iou_tile,
+                iou_merge=args.yolov8m30_iou_merge,
+                overlap=args.yolov8m30_overlap,
             )
             primary_sev = compute_primary_only(
-                view_sev=view_best,
+                view_sev=view_yolov8m30,
                 n_imgs=n_imgs,
                 primary_damage=primary_damage,
                 secondary_damage=secondary_damage,
-                mode=args.mode,
             )
 
-        # yolov8m120.pt -> secondary only
         secondary_sev = None
         if secondary_damage is not None:
-            view_yolo, _ = score_views_for_car(
-                model=model_yolo,
+            view_yolov8m120, _ = score_views_for_car(
+                model=model_yolov8m120,
                 car_dir=car_dir,
                 device=device,
-                imgsz=args.yolo_imgsz,
-                conf=args.yolo_conf,
-                iou_tile=args.yolo_iou_tile,
-                iou_merge=args.yolo_iou_merge,
-                overlap=args.yolo_overlap,
+                imgsz=args.yolov8m120_imgsz,
+                conf=args.yolov8m120_conf,
+                iou_tile=args.yolov8m120_iou_tile,
+                iou_merge=args.yolov8m120_iou_merge,
+                overlap=args.yolov8m120_overlap,
             )
             secondary_sev = compute_secondary_only(
-                view_sev=view_yolo,
+                view_sev=view_yolov8m120,
                 n_imgs=n_imgs,
                 primary_damage=primary_damage,
                 secondary_damage=secondary_damage,
-                mode=args.mode,
             )
 
         rows.append({
@@ -606,14 +576,16 @@ def main():
             f"damage_secondary_severity={secondary_sev}"
         )
 
-    df = pd.DataFrame(rows, columns=[
-        "folder",
-        "damage_primary_severity",
-        "damage_secondary_severity",
-    ])
+    df = pd.DataFrame(
+        rows,
+        columns=[
+            "folder",
+            "damage_primary_severity",
+            "damage_secondary_severity",
+        ],
+    )
     df.to_csv(out_csv, index=False)
     print(f"\nSaved: {out_csv}")
-
 
 if __name__ == "__main__":
     main()
