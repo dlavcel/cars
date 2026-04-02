@@ -1,23 +1,27 @@
 # 🚗 Car Auction Price Prediction
 
-End-to-end data pipeline that predicts car auction prices using web scraping, feature engineering, computer vision, and machine learning models.
+End-to-end pipeline for predicting car auction prices using multi-stage scraping, tabular feature engineering, computer vision-based damage severity estimation, and regression modeling.
 
 ---
 
 ## 🎯 Problem
 
-Car auction prices are highly variable and difficult to estimate due to:
+Car auction prices are difficult to estimate because they depend on multiple noisy factors:
 
-* Inconsistent vehicle condition
-* Missing or noisy data
-* Hidden damage factors
-* Market-driven price fluctuations
+* make and model
+* vehicle year
+* mileage
+* engine characteristics
+* reported damage
+* visible body damage
+* market-specific price behavior
 
-This project aims to:
+The goal of this project is to:
 
-* Predict auction prices
-* Identify key price drivers
-* Improve estimation accuracy using real-world data
+* predict final auction price
+* identify the strongest price drivers
+* enrich structured auction data with image-based damage severity signals
+* compare multiple regression models on real-world noisy data
 
 ---
 
@@ -25,110 +29,188 @@ This project aims to:
 
 The system is built as a full pipeline:
 
-1. Data collection (scraping auction listings)
-2. Data cleaning and normalization
-3. Feature engineering
-4. Computer vision-based condition analysis
-5. Machine learning modeling
-6. Prediction blending and evaluation
+1. account and access preparation
+2. auction data scraping
+3. listing-level and detail-level data collection
+4. image-based damage severity estimation
+5. feature engineering
+6. regression model training and benchmarking
+7. blended prediction and evaluation
 
 ---
 
 ## 🕷️ Data Collection Pipeline
 
-The scraping system is designed as a scalable multi-stage pipeline.
+The scraping layer is organized as a multi-stage workflow.
 
-### Architecture
+### 1. Access Preparation
 
-The pipeline is split into two main workers:
+Before scraping, authenticated access must be prepared.
 
-#### 1. List Worker
+A separate registration/setup stage is used before the main scraping pipeline starts. External credentials, proxy configuration, and environment-specific files are intentionally excluded from the repository.
 
-* Iterates through auction listing pages
-* Extracts structured summary data
-* Collects listing URLs for further processing
+### 2. List Worker
 
-#### 2. Detail Worker
+The list worker:
 
-* Visits individual listing pages
-* Extracts detailed attributes
-* Collects image URLs
+* iterates through auction result pages
+* extracts summary-level listing data
+* stores listing URLs for downstream processing
 
-This separation allows:
+### 3. Detail Worker
 
-* Parallel processing
-* Better scalability
-* Cleaner data flow
+The detail worker:
 
----
+* visits each listing page
+* extracts missing structured attributes
+* collects image URLs for visual analysis
 
-### 🔐 Access & Configuration
-
-The scraping pipeline requires authenticated access and environment configuration.
-
-* Session setup and credentials must be prepared beforehand
-* External configuration (e.g. proxies, accounts) is not included in the repository
-* Sensitive data is intentionally excluded
+This separation allows the scraping pipeline to run in parallel and scale better.
 
 ---
 
-## 👁️ Vehicle Condition Analysis (Computer Vision)
+## 👁️ Computer Vision Damage Severity Estimation
 
-After collecting image URLs, a computer vision stage is applied.
+The project includes a computer vision stage that estimates visual damage severity from vehicle images.
 
-### Pipeline
+### CV Pipeline
 
-* Detects visible vehicle damage from images
-* Extracts damage-related signals
-* Aggregates findings into structured features
+For each vehicle folder:
 
-### Generated Features
+1. images are loaded from the vehicle directory
+2. YOLO models detect visible damage on each image
+3. detections are converted into view-level severity scores
+4. severity is aggregated into final damage features
+5. these final features are added to the regression dataset
 
-* Damage count
-* Damage type
-* Estimated severity
+### Primary and Secondary Damage
 
-These features are later used in the price prediction model.
+The pipeline evaluates two damage channels separately:
+
+* **primary damage severity**
+* **secondary damage severity**
+
+Two YOLO models are used independently:
+
+* one model for **primary damage**
+* one model for **secondary damage**
+
+Each model has its own inference parameters such as:
+
+* image size
+* confidence threshold
+* tile IoU
+* merge IoU
+* overlap
+
+### Tiled Inference
+
+To improve damage detection on large vehicle images, the pipeline uses tiled prediction:
+
+* the image is split into overlapping tiles
+* YOLO runs on each tile
+* detections are merged using class-aware NMS
+
+This helps recover smaller or localized damage regions that could be missed in a single-pass prediction.
+
+### View-Based Severity Scoring
+
+Each image is treated as a specific vehicle view.
+
+Depending on the auction source, the pipeline supports either:
+
+* 4-view layout
+* 6-view layout
+
+Detected damage is converted into a severity score for each view based on:
+
+* damage class
+* confidence
+* bounding box extent
+* box count
+* critical damage types
+* soft confidence-based boosts
+
+### Damage Classes
+
+The severity logic uses detection classes such as:
+
+* scratch
+* rub
+* dent
+* crack
+* lamp broken
+* tire flat
+* dislocated part
+* no part
+* glass shatter
+* crash
+
+More severe classes have larger weights in the scoring function.
+
+### Final CV Features
+
+The CV stage produces final structured signals such as:
+
+* `damage_primary_severity`
+* `damage_secondary_severity`
+
+These are not stored as raw detection outputs in the regression table.
+Instead, detections are processed immediately, transformed into severity scores, and only the final aggregated features are added to the modeling dataset.
 
 ---
 
 ## 🔥 Feature Engineering
 
-### Out-of-Fold Target Encoding
+The tabular pipeline includes:
 
-A key feature:
+* text normalization
+* missing value handling
+* currency conversion
+* rare category grouping
+* custom damage severity transformation
+* historical price aggregation features
+
+### Out-of-Fold Historical Price Feature
+
+A key engineered feature is:
 
 * `make_model_year_price_median`
 
-Represents the **median historical price** for a given:
+This feature represents the median historical price for a given:
 
 * make
 * model
 * year
 
-Calculated using **out-of-fold cross-validation**, preventing data leakage.
+It is computed in an out-of-fold way to reduce target leakage during training.
 
-👉 This became the most important feature across models.
+This became one of the strongest predictors across the final models.
 
----
+### Structured Features Used for Regression
 
-### Additional Features
+Examples of features used in the regression pipeline:
 
-* Mileage
-* Engine volume
-* Cylinders
-* Damage type & severity
-* Fuel type
-* Transmission
-* Drive type
-
-Custom damage scoring was applied to convert categorical damage into numerical values.
+* make
+* model
+* fuel type
+* transmission
+* drive type
+* mileage
+* engine volume
+* cylinders
+* year
+* primary damage
+* secondary damage
+* `damage_primary_severity`
+* `damage_secondary_severity`
+* `make_model_year_price_median`
 
 ---
 
 ## 🧠 Modeling Approach
 
-Multiple models were trained and benchmarked:
+Several regression models were trained and benchmarked:
 
 * Linear Regression
 * Random Forest
@@ -136,25 +218,19 @@ Multiple models were trained and benchmarked:
 * LightGBM
 * CatBoost
 
----
+### Linear + Log Target Strategy
 
-### 📉 Log + Linear Blending
+Two target variants were used:
 
-Two prediction targets were used:
+* raw price
+* log-transformed price
 
-* Linear price
-* Log-transformed price
+Final prediction is a weighted blend of both:
 
-Final prediction:
+* 40% linear prediction
+* 60% log-based prediction
 
-* 40% linear
-* 60% log
-
-This approach:
-
-* Reduces outlier impact
-* Stabilizes predictions
-* Improves overall accuracy
+This makes predictions more stable and reduces sensitivity to extreme price values.
 
 ---
 
@@ -162,108 +238,135 @@ This approach:
 
 **Best model: XGBoost (blended)**
 
-* MAE: ~1337 €
-* RMSE: ~2189 €
+* MAE: ~1337
+* RMSE: ~2189
 * R²: ~0.83
 
 ### Prediction Accuracy
 
-* 25% within 10% error
-* 48% within 20%
-* 66% within 30%
+* 25% of predictions within 10% error
+* 48% within 20% error
+* 66% within 30% error
 
-👉 The model captures most of the variance while handling noisy auction data.
+These results show that the model captures a large share of auction price variance despite noisy and incomplete real-world data.
 
 ---
 
 ## 🧠 Key Insights
 
-The most important feature:
+The strongest predictive signal was:
 
 * `make_model_year_price_median`
 
-This shows that:
+This suggests that historical price behavior for a specific make-model-year combination is highly informative.
 
-👉 Historical pricing patterns dominate price prediction.
+Other important signals included:
 
+* mileage
+* reported primary damage
+* engine volume
+* year
+* model / make
+* image-based damage severity
 
 ---
 
 ## ⚠️ Limitations
 
-* Auction prices are highly volatile
-* Vehicle condition estimation is imperfect
-* Hidden mechanical issues are not captured
+* auction prices are highly volatile
+* some hidden mechanical issues cannot be inferred from images
+* image coverage is limited to available listing photos
+* CV severity depends on detection quality and image viewpoint
+* structured damage labels from source data may be incomplete or noisy
 
 ---
 
 ## 🚀 Business Value
 
-This system can be used to:
+This system can help:
 
-* Estimate fair auction prices
-* Identify undervalued vehicles
-* Support bidding decisions
-* Assist in pricing strategy
+* estimate fair auction prices
+* support bidding decisions
+* identify potentially undervalued vehicles
+* enrich auction listings with visual damage severity
+* analyze which structured and visual signals affect price the most
 
 ---
 
 ## 🔄 Full Pipeline
 
-1. Configure access
-2. Collect listing-level data
-3. Collect detail-level data
-4. Extract image-based damage features
-5. Generate structured features
-6. Train models
-7. Blend predictions
-8. Evaluate results
+1. prepare access and configuration
+2. run account/session setup
+3. scrape listing-level auction data
+4. scrape detail-level information and image URLs
+5. run YOLO-based image analysis
+6. convert detections into damage severity features
+7. build regression dataset
+8. train and compare models
+9. blend predictions
+10. evaluate model quality
 
 ---
 
 ## ▶️ How to Run
 
-### 1. Configure environment
+### 1. Prepare environment
 
-Prepare required credentials and configuration files.
+Configure required credentials, external files, and environment-specific settings.
 
-### 2. Run scraping pipeline
+### 2. Prepare access
 
 ```bash
-python manager.py --list-workers --detail_workers
+python register_accounts.py proxies.txt accounts_ready.txt yourdomain.com
 ```
 
-### 3. Train models
+### 3. Run scraping manager
+
+```bash
+python manager.py --list-worker --detail-worker
+```
+
+### 4. Run CV severity estimation
+
+```bash
+python evaluate_primary_secondary.py
+```
+
+### 5. Train and benchmark regression models
 
 ```bash
 python regression_final.py
 ```
 
-### 4. View results
-
-Model performance metrics will be printed in the console.
-
 ---
 
 ## 🧰 Tech Stack
 
-* Python (pandas, numpy, scikit-learn)
-* XGBoost, LightGBM, CatBoost
+* Python
+* pandas
+* numpy
+* scikit-learn
+* XGBoost
+* LightGBM
+* CatBoost
+* Ultralytics YOLO
+* PyTorch
+* OpenCV
+* BeautifulSoup
+* cloudscraper
 * SQL
-* Computer Vision (YOLO / image processing)
-* Web scraping (requests, BeautifulSoup, cloudscraper)
 
 ---
 
+---
 
 ## 💡 Key Takeaway
 
 This project demonstrates:
 
-* End-to-end data pipeline design
-* Scalable web scraping architecture
-* Advanced feature engineering (OOF encoding)
-* Integration of computer vision into ML pipeline
-* Real-world regression modeling with noisy data
-
----
+* multi-stage scraping architecture
+* integration of computer vision into tabular ML pipeline
+* custom image-to-severity feature generation
+* leakage-aware feature engineering
+* regression model benchmarking
+* blended prediction strategy for real-world auction data
