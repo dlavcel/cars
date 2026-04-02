@@ -433,9 +433,9 @@ def compute_secondary_only(
 def parse_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--cars_root", type=Path, default="F:/cars")
-    parser.add_argument("--meta_csv", type=Path, default="../other/failas_updated.csv")
-    parser.add_argument("--out_csv", type=Path, default="severity_updated.csv")
+    parser.add_argument("--cars_root", type=str, required=True)
+    parser.add_argument("--meta_csv", type=str, required=True)
+    parser.add_argument("--out_csv", type=str, required=True)
     parser.add_argument("--yolov8m30_weights", type=str, default="yolov8m30.pt")
     parser.add_argument("--yolov8m120_weights", type=str, default="yolov8m120.pt")
 

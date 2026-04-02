@@ -632,9 +632,9 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--meta_csv", type=str, required=True)
-    parser.add_argument("--yolov8m30_weights", type=str, required=True)
-    parser.add_argument("--yolov8m120_weights", type=str, required=True)
     parser.add_argument("--out_csv", type=str, required=True)
+    parser.add_argument("--yolov8m30_weights", type=str, default="yolov8m30.pt")
+    parser.add_argument("--yolov8m120_weights", type=str, default="yolov8m120.pt")
 
     parser.add_argument("--yolov8m30_imgsz", type=int, default=640)
     parser.add_argument("--yolov8m30_conf", type=float, default=0.5)
