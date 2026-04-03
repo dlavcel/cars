@@ -3,6 +3,7 @@ import warnings
 import joblib
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 from sklearn.model_selection import train_test_split, KFold
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -127,6 +128,25 @@ def blend_predictions(
 ) -> np.ndarray:
     pred_final = linear_weight * pred_linear + log_weight * pred_log
     return np.clip(pred_final, min_price, max_price)
+
+
+def plot_true_vs_pred(y_true, y_pred, title="True vs Predicted"):
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+
+    plt.figure(figsize=(8, 8))
+    plt.scatter(y_true, y_pred, alpha=0.5)
+
+    min_val = min(y_true.min(), y_pred.min())
+    max_val = max(y_true.max(), y_pred.max())
+
+    plt.plot([min_val, max_val], [min_val, max_val], linestyle="--")
+    plt.xlabel("True price")
+    plt.ylabel("Predicted price")
+    plt.title(title)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
 
 # ==========================
 # TEXT / DAMAGE HELPERS
@@ -617,6 +637,10 @@ def train_and_evaluate_ohe_model(
         "linear_metrics": linear_metrics,
         "log_metrics": log_metrics,
         "blend_metrics": blend_metrics,
+        "y_test_true": y_test_linear,
+        "pred_test_linear": pred_test_linear,
+        "pred_test_log": pred_test_log,
+        "pred_test_blend": pred_test_blend,
     }
 
 
@@ -689,6 +713,10 @@ def train_and_evaluate_catboost(
         "log_metrics": log_metrics,
         "blend_metrics": blend_metrics,
         "cat_feature_indices": cat_feature_indices,
+        "y_test_true": y_test_linear,
+        "pred_test_linear": pred_test_linear,
+        "pred_test_log": pred_test_log,
+        "pred_test_blend": pred_test_blend,
     }
 
 # ==========================
@@ -886,6 +914,29 @@ if __name__ == "__main__":
     best_row = comparison_df.sort_values("MAE", ascending=True).iloc[0]
     print("\nBEST MODEL:")
     print(best_row.to_string())
+
+    best_model_full_name = best_row["model"]
+
+    if best_model_full_name.endswith("_linear"):
+        best_model_name = best_model_full_name[:-7]
+        best_prediction_key = "pred_test_linear"
+    elif best_model_full_name.endswith("_blend"):
+        best_model_name = best_model_full_name[:-6]
+        best_prediction_key = "pred_test_blend"
+    elif best_model_full_name.endswith("_log"):
+        best_model_name = best_model_full_name[:-4]
+        best_prediction_key = "pred_test_log"
+    else:
+        raise ValueError(f"Cannot parse best model name: {best_model_full_name}")
+
+    best_result = fitted_results[best_model_name]
+    best_pred = best_result[best_prediction_key]
+
+    plot_true_vs_pred(
+        best_result["y_test_true"],
+        best_pred,
+        title=f"BEST MODEL | {best_model_full_name} | TRUE vs PREDICTED"
+    )
 
     for model_name, result in fitted_results.items():
         if model_name == "catboost":
